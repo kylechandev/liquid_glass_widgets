@@ -22,6 +22,9 @@ enum GlassScrollEdgeStyle {
   /// Matches iOS 26's `.hard` edge effect style. Useful when you want a
   /// clear visual separation between the bar and content.
   hard,
+
+  /// 最新的 iOS26 效果，模糊效果更明显
+  huge,
 }
 
 /// A widget that fades scroll content at the top and/or bottom edges.
@@ -174,8 +177,7 @@ class _GlassScrollEdgeEffectState extends State<GlassScrollEdgeEffect> {
       return;
     }
 
-    final boundary = _backgroundKey!.currentContext?.findRenderObject()
-        as RenderRepaintBoundary?;
+    final boundary = _backgroundKey!.currentContext?.findRenderObject() as RenderRepaintBoundary?;
 
     if (boundary == null || !boundary.hasSize || boundary.size.isEmpty) {
       // Boundary not ready yet — retry after the first frame.
@@ -261,8 +263,7 @@ class _GlassScrollEdgeEffectState extends State<GlassScrollEdgeEffect> {
         if (widget.fadeBottom)
           _buildOverlay(
             isTop: false,
-            height:
-                _effectiveHeight(widget.bottomFadeHeight, screenSize.height),
+            height: _effectiveHeight(widget.bottomFadeHeight, screenSize.height),
             screenSize: screenSize,
             hasTexture: hasTexture,
           ),
@@ -300,17 +301,14 @@ class _GlassScrollEdgeEffectState extends State<GlassScrollEdgeEffect> {
 
   /// Fallback: solid-colour gradient overlay for use outside [GlassPage].
   Widget _buildColorOverlay({required bool isTop}) {
-    final color =
-        widget.fadeColor ?? CupertinoTheme.of(context).scaffoldBackgroundColor;
+    final color = widget.fadeColor ?? CupertinoTheme.of(context).scaffoldBackgroundColor;
     final curve = _kFadeCurves[widget.style]!;
     return DecoratedBox(
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: isTop ? Alignment.topCenter : Alignment.bottomCenter,
           end: isTop ? Alignment.bottomCenter : Alignment.topCenter,
-          colors: curve.alphas
-              .map((a) => color.withValues(alpha: color.a * a))
-              .toList(),
+          colors: curve.alphas.map((a) => color.withValues(alpha: color.a * a)).toList(),
           stops: curve.stops,
         ),
       ),
@@ -321,8 +319,7 @@ class _GlassScrollEdgeEffectState extends State<GlassScrollEdgeEffect> {
     // Hard style uses a tighter transition zone (half of soft) combined with
     // a steeper gradient curve — so it's a different *shape*, not just a
     // compressed version of soft.
-    final adjusted =
-        widget.style == GlassScrollEdgeStyle.hard ? height * 0.5 : height;
+    final adjusted = widget.style == GlassScrollEdgeStyle.hard ? height * 0.5 : height;
     // Clamp to 40% of available height to avoid overlapping zones.
     return adjusted.clamp(0.0, boundsHeight * 0.4);
   }
@@ -366,6 +363,10 @@ const Map<GlassScrollEdgeStyle, _FadeCurve> _kFadeCurves = {
   GlassScrollEdgeStyle.hard: _FadeCurve(
     [1.0, 0.90, 0.50, 0.04, 0.0],
     [0.0, 0.30, 0.60, 0.85, 0.95],
+  ),
+  GlassScrollEdgeStyle.huge: _FadeCurve(
+    [1.0, 0.90, 0.50, 0.04, 0.0],
+    [0.0, 0.75, 0.80, 0.90, 0.99],
   ),
 };
 
@@ -429,9 +430,7 @@ class _TextureFadePainter extends CustomPainter {
       ..shader = LinearGradient(
         begin: isTop ? Alignment.topCenter : Alignment.bottomCenter,
         end: isTop ? Alignment.bottomCenter : Alignment.topCenter,
-        colors: curve.alphas
-            .map((a) => Color.fromARGB((a * 255).round(), 0, 0, 0))
-            .toList(),
+        colors: curve.alphas.map((a) => Color.fromARGB((a * 255).round(), 0, 0, 0)).toList(),
         stops: curve.stops,
       ).createShader(dstRect);
 
@@ -440,9 +439,5 @@ class _TextureFadePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_TextureFadePainter oldDelegate) =>
-      image != oldDelegate.image ||
-      isTop != oldDelegate.isTop ||
-      screenHeight != oldDelegate.screenHeight ||
-      style != oldDelegate.style;
+  bool shouldRepaint(_TextureFadePainter oldDelegate) => image != oldDelegate.image || isTop != oldDelegate.isTop || screenHeight != oldDelegate.screenHeight || style != oldDelegate.style;
 }
