@@ -366,7 +366,7 @@ const Map<GlassScrollEdgeStyle, _FadeCurve> _kFadeCurves = {
   ),
   GlassScrollEdgeStyle.huge: _FadeCurve(
     [1.0, 0.90, 0.50, 0.04, 0.0],
-    [0.0, 0.75, 0.80, 0.90, 0.99],
+    [0.0, 0.60, 0.80, 0.90, 0.99],
   ),
 };
 

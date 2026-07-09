@@ -32,9 +32,7 @@ const _kBg = CupertinoDynamicColor.withBrightness(
     color: Color(0xFFF2F2F7),
     darkColor: Color(0xFF000000));
 const _kSeparator = CupertinoColors.separator; // ~20% white
-const _kAvatarBg = CupertinoDynamicColor.withBrightness(
-    color: Color(0xFFE5E5EA),
-    darkColor: Color(0xFF3A3A50)); // muted indigo — iOS default avatar bg
+const _kAvatarBg = CupertinoDynamicColor.withBrightness(color: Color(0xFFE5E5EA), darkColor: Color(0xFF3A3A50)); // muted indigo — iOS default avatar bg
 const _kBlue = CupertinoColors.systemBlue; // iOS 26 blue
 
 // Glass shared by both menu triggers — matches the "Edit" pill aesthetic
@@ -146,14 +144,12 @@ const _kConversations = [
   ),
   _Conversation(
     name: '+61 428 048 980',
-    preview:
-        'Hi! Just a reminder your appointment is Fri 9 May at 2:30 PM. Reply STOP to opt out.',
+    preview: 'Hi! Just a reminder your appointment is Fri 9 May at 2:30 PM. Reply STOP to opt out.',
     time: 'Monday',
   ),
   _Conversation(
     name: '+61 482 092 063',
-    preview:
-        'Your parcel has been delivered to the front door. Track at auspost.com.au',
+    preview: 'Your parcel has been delivered to the front door. Track at auspost.com.au',
     time: 'Monday',
   ),
   _Conversation(
@@ -170,8 +166,7 @@ const _kConversations = [
   ),
   _Conversation(
     name: '+61 409 593 783',
-    preview:
-        'Hi! FREE flu vaccines are now available for ALL ages at participating pharmacies near you.',
+    preview: 'Hi! FREE flu vaccines are now available for ALL ages at participating pharmacies near you.',
     time: 'Sunday',
   ),
   _Conversation(
@@ -285,11 +280,10 @@ class _MessagesScreenState extends State<MessagesScreen> {
     final botPad = MediaQuery.paddingOf(context).bottom;
 
     return GlassScaffold(
+      edgeStyle: GlassScrollEdgeStyle.huge,
       background: ColoredBox(color: _kBg.resolveFrom(context)),
       settings: _kTriggerGlass(context),
-      statusBarStyle: CupertinoTheme.of(context).brightness == Brightness.dark
-          ? GlassStatusBarStyle.light
-          : GlassStatusBarStyle.dark,
+      statusBarStyle: CupertinoTheme.of(context).brightness == Brightness.dark ? GlassStatusBarStyle.light : GlassStatusBarStyle.dark,
       appBarHeight: 52,
       bottomBarHeight: 60,
       appBar: _NavBar(
@@ -478,28 +472,19 @@ class _FilterMenu extends StatelessWidget {
         GlassMenuItem(
           title: 'Messages',
           icon: Icon(SFSymbols.bubble_left_and_bubble_right),
-          trailing: activeFilter == 'Messages'
-              ? Icon(SFSymbols.checkmark,
-                  color: CupertinoColors.label.resolveFrom(context), size: 16)
-              : null,
+          trailing: activeFilter == 'Messages' ? Icon(SFSymbols.checkmark, color: CupertinoColors.label.resolveFrom(context), size: 16) : null,
           onTap: () => onFilterChanged('Messages'),
         ),
         GlassMenuItem(
           title: 'Spam',
           icon: Icon(SFSymbols.xmark_bin),
-          trailing: activeFilter == 'Spam'
-              ? Icon(SFSymbols.checkmark,
-                  color: CupertinoColors.label.resolveFrom(context), size: 16)
-              : null,
+          trailing: activeFilter == 'Spam' ? Icon(SFSymbols.checkmark, color: CupertinoColors.label.resolveFrom(context), size: 16) : null,
           onTap: () => onFilterChanged('Spam'),
         ),
         GlassMenuItem(
           title: 'Recently Deleted',
           icon: Icon(SFSymbols.trash),
-          trailing: activeFilter == 'Recently Deleted'
-              ? Icon(SFSymbols.checkmark,
-                  color: CupertinoColors.label.resolveFrom(context), size: 16)
-              : null,
+          trailing: activeFilter == 'Recently Deleted' ? Icon(SFSymbols.checkmark, color: CupertinoColors.label.resolveFrom(context), size: 16) : null,
           onTap: () => onFilterChanged('Recently Deleted'),
         ),
         const GlassMenuDivider(),
@@ -528,8 +513,7 @@ class _ConversationRow extends StatelessWidget {
       child: Column(
         children: [
           Padding(
-            padding:
-                const EdgeInsets.only(left: 8, right: 16, top: 8, bottom: 8),
+            padding: const EdgeInsets.only(left: 8, right: 16, top: 8, bottom: 8),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
@@ -564,12 +548,9 @@ class _ConversationRow extends StatelessWidget {
                             child: Text(
                               c.name,
                               style: TextStyle(
-                                color:
-                                    CupertinoColors.label.resolveFrom(context),
+                                color: CupertinoColors.label.resolveFrom(context),
                                 fontSize: 17,
-                                fontWeight: c.isUnread
-                                    ? FontWeight.w600
-                                    : FontWeight.w400,
+                                fontWeight: c.isUnread ? FontWeight.w600 : FontWeight.w400,
                               ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -579,8 +560,7 @@ class _ConversationRow extends StatelessWidget {
                           Text(
                             c.time,
                             style: TextStyle(
-                              color: CupertinoColors.secondaryLabel
-                                  .resolveFrom(context),
+                              color: CupertinoColors.secondaryLabel.resolveFrom(context),
                               fontSize: 13,
                             ),
                           ),
@@ -588,8 +568,7 @@ class _ConversationRow extends StatelessWidget {
                           Icon(
                             SFSymbols.chevron_right,
                             size: 12,
-                            color: CupertinoColors.tertiaryLabel
-                                .resolveFrom(context),
+                            color: CupertinoColors.tertiaryLabel.resolveFrom(context),
                           ),
                         ],
                       ),
@@ -597,8 +576,7 @@ class _ConversationRow extends StatelessWidget {
                       Text(
                         c.hasAttachment ? '📷  ${c.preview}' : c.preview,
                         style: TextStyle(
-                          color: CupertinoColors.secondaryLabel
-                              .resolveFrom(context),
+                          color: CupertinoColors.secondaryLabel.resolveFrom(context),
                           fontSize: 15,
                           height: 1.3,
                         ),
@@ -614,10 +592,7 @@ class _ConversationRow extends StatelessWidget {
           // Separator indented past the dot + avatar
           Padding(
             padding: EdgeInsets.only(left: 76),
-            child: Divider(
-                height: 1,
-                color: _kSeparator.resolveFrom(context),
-                thickness: 0.4),
+            child: Divider(height: 1, color: _kSeparator.resolveFrom(context), thickness: 0.4),
           ),
         ],
       ),
@@ -712,8 +687,7 @@ class _SearchBarState extends State<_SearchBar> {
           // we subtract 8 so the bar sits at the desired visual height (26px).
           // On devices with small or no insets (Android gesture nav, iPhone SE),
           // a minimum padding of 32 ensures it's not too close to the bottom edge.
-          padding: EdgeInsets.fromLTRB(
-              12, 8, 12, widget.bottomPad > 32 ? widget.bottomPad - 8 : 32),
+          padding: EdgeInsets.fromLTRB(12, 8, 12, widget.bottomPad > 32 ? widget.bottomPad - 8 : 32),
           child: AdaptiveLiquidGlassLayer(
             settings: _kSearchGlass(context),
             quality: GlassQuality.premium,
@@ -728,8 +702,7 @@ class _SearchBarState extends State<_SearchBar> {
                     child: GlassSearchBar(
                       focusNode: _focusNode,
                       placeholder: 'Search',
-                      useOwnLayer:
-                          isLight, // joins blend group in dark, separates in light to show shadow
+                      useOwnLayer: isLight, // joins blend group in dark, separates in light to show shadow
                       settings: _kSearchGlass(context),
                       quality: GlassQuality.premium,
                       showsCancelButton: true,
@@ -762,8 +735,7 @@ class _SearchBarState extends State<_SearchBar> {
                                 ambientBaseLight: isLight ? 0.25 : 0.08,
                                 icon: Icon(
                                   SFSymbols.square_and_pencil,
-                                  color: CupertinoColors.label
-                                      .resolveFrom(context),
+                                  color: CupertinoColors.label.resolveFrom(context),
                                   size: 22,
                                 ),
                               ),
