@@ -148,8 +148,29 @@ import 'shared/segmented_control_internal.dart';
 ///   ),
 /// )
 /// ```
+///
+/// ### Vertical icon control
+/// ```dart
+/// GlassSegmentedControl(
+///   direction: Axis.vertical,
+///   height: 44, // cross-axis width in vertical mode
+///   segmentExtent: 52,
+///   segments: const [
+///     GlassSegment(
+///       icon: Icon(CupertinoIcons.square_grid_2x2),
+///       semanticLabel: 'Canvas',
+///     ),
+///     GlassSegment(
+///       icon: Icon(CupertinoIcons.circle_grid_hex),
+///       semanticLabel: 'Flow',
+///     ),
+///   ],
+///   selectedIndex: selectedIndex,
+///   onSegmentSelected: onSelected,
+/// )
+/// ```
 class GlassSegmentedControl extends StatefulWidget {
-  /// Creates a fixed-width glass segmented control (iOS UISegmentedControl).
+  /// Creates a fixed-extent glass segmented control (iOS UISegmentedControl).
   ///
   /// All segments are equal-width. For a scrollable variant that mimics
   /// [GlassTabBar]`(isScrollable: true)`, use [GlassSegmentedControl.scrollable].
@@ -159,7 +180,8 @@ class GlassSegmentedControl extends StatefulWidget {
     required this.onSegmentSelected,
     super.key,
     this.height = GlassDefaults.heightControl,
-    this.borderRadius = GlassDefaults.borderRadius,
+    this.borderRadius = GlassDefaults.capsuleRadius,
+    this.indicatorBorderRadius,
     this.padding = const EdgeInsets.all(2),
     this.selectedTextStyle,
     this.unselectedTextStyle,
@@ -173,6 +195,8 @@ class GlassSegmentedControl extends StatefulWidget {
     this.useOwnLayer = false,
     this.quality,
     this.backgroundKey,
+    this.direction = Axis.horizontal,
+    this.segmentExtent,
     // ── iOS 26 interaction ──────────────────────────────────────────────────
     this.interactionBehavior = GlassInteractionBehavior.full,
     this.glowColor,
@@ -225,7 +249,8 @@ class GlassSegmentedControl extends StatefulWidget {
     required this.onSegmentSelected,
     super.key,
     this.height = 44.0,
-    this.borderRadius = GlassDefaults.borderRadius,
+    this.borderRadius = GlassDefaults.capsuleRadius,
+    this.indicatorBorderRadius,
     this.padding = const EdgeInsets.all(2),
     this.selectedTextStyle,
     this.unselectedTextStyle,
@@ -248,6 +273,8 @@ class GlassSegmentedControl extends StatefulWidget {
     this.dividerSettings,
     this.indicatorShadow,
   })  : isScrollable = true,
+        direction = Axis.horizontal,
+        segmentExtent = null,
         interactionBehavior = GlassInteractionBehavior.full,
         glowColor = null,
         glowRadius = 1.5,
@@ -294,19 +321,46 @@ class GlassSegmentedControl extends StatefulWidget {
   /// > compare the received index against `selectedIndex` before acting.
   final ValueChanged<int> onSegmentSelected;
 
+  /// The axis along which fixed-mode segments are laid out.
+  ///
+  /// Scrollable controls remain horizontal.
+  final Axis direction;
+
+  /// Main-axis size of each segment in vertical mode.
+  ///
+  /// Defaults to [height], producing square segments.
+  final double? segmentExtent;
+
   // ===========================================================================
   // Layout Properties
   // ===========================================================================
 
   /// Height of the segmented control.
   ///
+  /// In vertical mode this is the control's cross-axis width. The total height
+  /// is ([segmentExtent] ?? [height]) × the number of segments.
+  ///
   /// Defaults to 32 (matching iOS UISegmentedControl).
   final double height;
 
   /// Border radius of the segmented control.
   ///
-  /// Defaults to 16 (height / 2) for a pill shape.
+  /// Defaults to [9999.0] — a capsule that matches the iOS 26 UISegmentedControl
+  /// appearance regardless of bar height. Set to a finite value (e.g. 16) to
+  /// produce rounded-rectangle corners.
   final double borderRadius;
+
+  /// Optional override for the active indicator's corner radius.
+  ///
+  /// The radius is resolved in priority order:
+  /// 1. **Manual override** (this value) — always wins.
+  /// 2. **Capsule guard** — if [borderRadius] ≥ 9999.0 the indicator also
+  ///    receives 9999.0, keeping the glass shader in true-capsule mode even
+  ///    during jelly-bloom expansion where the pill canvas grows beyond its
+  ///    rest size.
+  /// 3. **Concentric math** — otherwise `(borderRadius − 2).clamp(0, 9999)`
+  ///    so the indicator arcs nest concentrically inside the container.
+  final double? indicatorBorderRadius;
 
   /// Padding around the indicator inside the background.
   ///
@@ -521,7 +575,7 @@ class _GlassSegmentedControlState extends State<GlassSegmentedControl> {
           iconSize: widget.iconSize,
           labelPadding: widget.labelPadding,
           quality: effectiveQuality,
-          indicatorBorderRadius: null, // derived from tabBarBorderRadius
+          indicatorBorderRadius: widget.indicatorBorderRadius,
           indicatorSettings: widget.indicatorSettings,
           indicatorPinchStrength: widget.indicatorPinchStrength,
           indicatorExpansion: widget.indicatorExpansion,
@@ -551,8 +605,12 @@ class _GlassSegmentedControlState extends State<GlassSegmentedControl> {
 
     // SizedBox sets the height without clipping. DecoratedBox paints the
     // background without enforcing a clip — jelly expansion can overflow freely.
+    final isVertical = widget.direction == Axis.vertical;
     final control = SizedBox(
-      height: widget.height,
+      width: isVertical ? widget.height : null,
+      height: isVertical
+          ? (widget.segmentExtent ?? widget.height) * widget.segments.length
+          : widget.height,
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: backgroundColor,
@@ -562,6 +620,7 @@ class _GlassSegmentedControlState extends State<GlassSegmentedControl> {
           padding: widget.padding,
           child: SegmentedControlContent(
             segments: widget.segments,
+            direction: widget.direction,
             selectedIndex: widget.selectedIndex,
             onSegmentSelected: widget.onSegmentSelected,
             selectedTextStyle: widget.selectedTextStyle,
@@ -571,6 +630,7 @@ class _GlassSegmentedControlState extends State<GlassSegmentedControl> {
             indicatorPinchStrength: widget.indicatorPinchStrength,
             indicatorExpansion: widget.indicatorExpansion,
             borderRadius: widget.borderRadius,
+            indicatorBorderRadius: widget.indicatorBorderRadius,
             quality: effectiveQuality,
             backgroundKey: widget.backgroundKey,
             interactionBehavior: widget.interactionBehavior,

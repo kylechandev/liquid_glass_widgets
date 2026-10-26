@@ -237,7 +237,8 @@ void main() {
     test('handleDrag phase → evaluateMove always true', () {
       arena.phase = GesturePhase.handleDrag;
       expect(
-          arena.evaluateMove(0, 0, GlassSheetState.half, 5,
+          arena.evaluateMove(
+              0, 0, GlassSheetState.half, GlassSheetState.full, 5,
               canScrollListUp: false, hasScrollClients: false),
           isTrue);
     });
@@ -245,7 +246,8 @@ void main() {
     test('scrolling phase → evaluateMove always false', () {
       arena.phase = GesturePhase.scrolling;
       expect(
-          arena.evaluateMove(0, 0, GlassSheetState.half, 5,
+          arena.evaluateMove(
+              0, 0, GlassSheetState.half, GlassSheetState.full, 5,
               canScrollListUp: false, hasScrollClients: false),
           isFalse);
     });
@@ -253,14 +255,16 @@ void main() {
     test('contentDrag phase → evaluateMove always true', () {
       arena.phase = GesturePhase.contentDrag;
       expect(
-          arena.evaluateMove(0, 0, GlassSheetState.half, 5,
+          arena.evaluateMove(
+              0, 0, GlassSheetState.half, GlassSheetState.full, 5,
               canScrollListUp: false, hasScrollClients: false),
           isTrue);
     });
 
     test('upward full + hasScrollClients → scrolling', () {
       arena.beginPointer(100, 50, 0.9, PointerDeviceKind.touch);
-      final r = arena.evaluateMove(80, 50, GlassSheetState.full, 5,
+      final r = arena.evaluateMove(
+          80, 50, GlassSheetState.full, GlassSheetState.full, 5,
           canScrollListUp: false, hasScrollClients: true);
       expect(r, isFalse);
       expect(arena.phase, GesturePhase.scrolling);
@@ -268,7 +272,8 @@ void main() {
 
     test('upward full + no clients → contentDrag', () {
       arena.beginPointer(100, 50, 0.9, PointerDeviceKind.touch);
-      final r = arena.evaluateMove(80, 50, GlassSheetState.full, 5,
+      final r = arena.evaluateMove(
+          80, 50, GlassSheetState.full, GlassSheetState.full, 5,
           canScrollListUp: false, hasScrollClients: false);
       expect(r, isTrue);
       expect(arena.phase, GesturePhase.contentDrag);
@@ -276,7 +281,8 @@ void main() {
 
     test('downward full + canScrollListUp → scrolling', () {
       arena.beginPointer(100, 50, 0.9, PointerDeviceKind.touch);
-      final r = arena.evaluateMove(120, 50, GlassSheetState.full, 5,
+      final r = arena.evaluateMove(
+          120, 50, GlassSheetState.full, GlassSheetState.full, 5,
           canScrollListUp: true, hasScrollClients: true);
       expect(r, isFalse);
       expect(arena.phase, GesturePhase.scrolling);
@@ -284,7 +290,8 @@ void main() {
 
     test('downward full + cannot scroll → contentDrag', () {
       arena.beginPointer(100, 50, 0.9, PointerDeviceKind.touch);
-      final r = arena.evaluateMove(120, 50, GlassSheetState.full, 5,
+      final r = arena.evaluateMove(
+          120, 50, GlassSheetState.full, GlassSheetState.full, 5,
           canScrollListUp: false, hasScrollClients: false);
       expect(r, isTrue);
       expect(arena.phase, GesturePhase.contentDrag);
@@ -292,14 +299,16 @@ void main() {
 
     test('half state vertical drag → contentDrag', () {
       arena.beginPointer(100, 50, 0.5, PointerDeviceKind.touch);
-      final r = arena.evaluateMove(120, 50, GlassSheetState.half, 5,
+      final r = arena.evaluateMove(
+          120, 50, GlassSheetState.half, GlassSheetState.full, 5,
           canScrollListUp: false, hasScrollClients: false);
       expect(r, isTrue);
     });
 
     test('horizontal drag → false', () {
       arena.beginPointer(100, 50, 0.5, PointerDeviceKind.touch);
-      final r = arena.evaluateMove(102, 80, GlassSheetState.half, 5,
+      final r = arena.evaluateMove(
+          102, 80, GlassSheetState.half, GlassSheetState.full, 5,
           canScrollListUp: false, hasScrollClients: false);
       expect(r, isFalse);
     });
@@ -332,6 +341,151 @@ void main() {
 
     test('snapToState does not crash', () {
       GlassModalSheetController().snapToState(GlassSheetState.full);
+    });
+  });
+
+  group('SheetGeometry.resolvePeek', () {
+    const dismissible = GlassSheetMode.dismissible;
+    const persistent = GlassSheetMode.persistent;
+    const twoStop = {GlassSheetDetent.medium, GlassSheetDetent.large};
+    const withSmall = {
+      GlassSheetDetent.small,
+      GlassSheetDetent.medium,
+      GlassSheetDetent.large,
+    };
+
+    test('small in detents enables the peek floor', () {
+      expect(
+        SheetGeometry.resolvePeek(
+            enablePeek: null, detents: withSmall, mode: dismissible),
+        isTrue,
+      );
+    });
+
+    test('no small, dismissible → no peek', () {
+      expect(
+        SheetGeometry.resolvePeek(
+            enablePeek: null, detents: twoStop, mode: dismissible),
+        isFalse,
+      );
+    });
+
+    test('persistent keeps its floor without small (back-compat)', () {
+      // A persistent sheet is DEFINED by resting instead of dismissing, so the
+      // default {medium, large} must not silently strip its floor — that would
+      // break every released persistent sheet.
+      expect(
+        SheetGeometry.resolvePeek(
+            enablePeek: null, detents: twoStop, mode: persistent),
+        isTrue,
+      );
+    });
+
+    test('explicit enablePeek wins over the detents set, both ways', () {
+      // The deprecated flag is still an existing caller's stated intent.
+      expect(
+        SheetGeometry.resolvePeek(
+            enablePeek: false, detents: withSmall, mode: persistent),
+        isFalse,
+        reason: 'enablePeek: false must defeat small + persistent',
+      );
+      expect(
+        SheetGeometry.resolvePeek(
+            enablePeek: true, detents: twoStop, mode: dismissible),
+        isTrue,
+        reason: 'enablePeek: true must add a floor with no small present',
+      );
+    });
+
+    test('peek detent feeds orderedStates as a real rest state', () {
+      final geo = SheetGeometry(
+        mode: dismissible,
+        halfSize: 400,
+        fullSize: 800,
+        peekSize: 100,
+        enablePeek: SheetGeometry.resolvePeek(
+            enablePeek: null, detents: withSmall, mode: dismissible),
+        enableHalf: withSmall.contains(GlassSheetDetent.medium),
+        enableFull: withSmall.contains(GlassSheetDetent.large),
+      );
+      expect(geo.orderedStates, contains(GlassSheetState.peek));
+    });
+
+    test('all primary detents disabled still yields an openable sheet', () {
+      // The widget asserts a non-empty detent set in debug, but release
+      // builds don't run asserts — a sheet reaching this state with no
+      // primary detent would render permanently un-openable. orderedStates
+      // falls back to half rather than returning an empty rest set.
+      final geo = SheetGeometry(
+        mode: dismissible,
+        halfSize: 400,
+        fullSize: 800,
+        peekSize: 0,
+        enablePeek: false,
+        enableHalf: false,
+        enableFull: false,
+      );
+      expect(geo.orderedStates, contains(GlassSheetState.half));
+      expect(geo.maxState, GlassSheetState.half);
+    });
+
+    test('half disabled by a zero halfSize also falls back', () {
+      // enableHalf is true here, but `halfSize > 0` gates it — the guardrail
+      // has to catch this second route to an empty set too.
+      final geo = SheetGeometry(
+        mode: dismissible,
+        halfSize: 0,
+        fullSize: 800,
+        peekSize: 0,
+        enablePeek: false,
+        enableHalf: true,
+        enableFull: false,
+      );
+      expect(geo.orderedStates, contains(GlassSheetState.half));
+    });
+  });
+
+  group('orderedStates — dismissible:false', () {
+    test(
+        'large-only non-dismissible sheet has orderedStates [full] '
+        '(minState == maxState == full, rubber-bands at full)', () {
+      // This is the "full-only, non-dismissible" Apple flavor documented in
+      // #178: the sheet opens straight to full and cannot be swiped away.
+      // orderedStates must be exactly [full] — no hidden, no half, no peek.
+      const largeOnly = {GlassSheetDetent.large};
+      final geo = SheetGeometry(
+        mode: GlassSheetMode.dismissible,
+        halfSize: 400,
+        fullSize: 800,
+        peekSize: 0,
+        enablePeek: false,
+        enableHalf: largeOnly.contains(GlassSheetDetent.medium),
+        enableFull: largeOnly.contains(GlassSheetDetent.large),
+        dismissible: false,
+      );
+      expect(geo.orderedStates, [GlassSheetState.full]);
+      expect(geo.minState, GlassSheetState.full);
+      expect(geo.maxState, GlassSheetState.full);
+    });
+
+    test(
+        'medium-only non-dismissible sheet has orderedStates [half] '
+        '(rubber-bands at half, never morphs to opaque full)', () {
+      // The Apple Pay / Sign in with Apple flavor: half-only glass, no dismiss.
+      const mediumOnly = {GlassSheetDetent.medium};
+      final geo = SheetGeometry(
+        mode: GlassSheetMode.dismissible,
+        halfSize: 400,
+        fullSize: 800,
+        peekSize: 0,
+        enablePeek: false,
+        enableHalf: mediumOnly.contains(GlassSheetDetent.medium),
+        enableFull: mediumOnly.contains(GlassSheetDetent.large),
+        dismissible: false,
+      );
+      expect(geo.orderedStates, [GlassSheetState.half]);
+      expect(geo.minState, GlassSheetState.half);
+      expect(geo.maxState, GlassSheetState.half);
     });
   });
 }

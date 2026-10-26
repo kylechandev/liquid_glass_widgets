@@ -164,7 +164,7 @@ class DraggableIndicatorPhysics {
     return (relativeIndex * 2) - 1;
   }
 
-  /// Converts a global drag position to horizontal alignment (-1 to 1).
+  /// Converts a global drag position to alignment (-1 to 1) along [direction].
   ///
   /// Applies rubber band resistance when dragging beyond edges.
   ///
@@ -172,13 +172,15 @@ class DraggableIndicatorPhysics {
   /// - [globalPosition]: The global position from drag details
   /// - [context]: Build context to find the render box
   /// - [itemCount]: Total number of items
+  /// - [direction]: Axis whose coordinate and extent drive the mapping
   ///
   /// Returns: Alignment value with rubber band resistance applied.
   static double getAlignmentFromGlobalPosition(
     Offset globalPosition,
     BuildContext context,
-    int itemCount,
-  ) {
+    int itemCount, {
+    Axis direction = Axis.horizontal,
+  }) {
     final box = context.findRenderObject()! as RenderBox;
     final localPosition = box.globalToLocal(globalPosition);
 
@@ -188,7 +190,11 @@ class DraggableIndicatorPhysics {
     final padding = indicatorWidth / 2;
 
     // Map drag position to 0-1 range
-    final rawRelativeX = (localPosition.dx / box.size.width).clamp(0.0, 1.0);
+    final mainPosition =
+        direction == Axis.horizontal ? localPosition.dx : localPosition.dy;
+    final mainExtent =
+        direction == Axis.horizontal ? box.size.width : box.size.height;
+    final rawRelativeX = (mainPosition / mainExtent).clamp(0.0, 1.0);
     final normalizedX = (rawRelativeX - padding) / draggableRange;
 
     // Apply rubber band resistance for overdrag
@@ -196,6 +202,49 @@ class DraggableIndicatorPhysics {
 
     // Convert to -1 to 1 range
     return (adjustedRelativeX * 2) - 1;
+  }
+
+  /// Converts a global tap position to a tab index using the raw (un-remapped)
+  /// position fraction.
+  ///
+  /// Unlike [getAlignmentFromGlobalPosition], this method does **not** apply
+  /// the indicator-center padding/draggable-range remap. It divides the bar
+  /// into [itemCount] equal slices and returns which slice contains the tap.
+  ///
+  /// Use this for **discrete tap-to-index conversions** (e.g. `onTapDown`).
+  /// Use [getAlignmentFromGlobalPosition] for **continuous drag tracking**
+  /// where the indicator center must stay within its physical travel range.
+  ///
+  /// Parameters:
+  /// - [globalPosition]: The global position from tap/pointer details
+  /// - [context]: Build context used to find the render box
+  /// - [itemCount]: Total number of items (tabs)
+  /// - [direction]: Axis along which the bar is laid out (default: horizontal)
+  ///
+  /// Returns: The item index (0-based, clamped to [0, itemCount-1]).
+  ///
+  /// Example:
+  /// ```dart
+  /// // 400-px wide bar with 4 tabs (each 100 px):
+  /// // tap at x=310 → rawRelativeX=0.775 → (0.775 * 4).floor() = 3
+  /// final index = DraggableIndicatorPhysics.tabIndexFromGlobalPosition(
+  ///   globalPosition, context, 4,
+  /// );
+  /// ```
+  static int tabIndexFromGlobalPosition(
+    Offset globalPosition,
+    BuildContext context,
+    int itemCount, {
+    Axis direction = Axis.horizontal,
+  }) {
+    final box = context.findRenderObject()! as RenderBox;
+    final localPosition = box.globalToLocal(globalPosition);
+    final mainPosition =
+        direction == Axis.horizontal ? localPosition.dx : localPosition.dy;
+    final mainExtent =
+        direction == Axis.horizontal ? box.size.width : box.size.height;
+    final rawRelativeX = (mainPosition / mainExtent).clamp(0.0, 1.0);
+    return (rawRelativeX * itemCount).floor().clamp(0, itemCount - 1);
   }
 
   // ===========================================================================

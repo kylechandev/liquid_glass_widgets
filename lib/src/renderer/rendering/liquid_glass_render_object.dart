@@ -67,7 +67,18 @@ abstract class LiquidGlassRenderObject extends RenderProxyBox {
         -sin(value.lightAngle),
       );
     }
+    // alwaysNeedsCompositing == (_geometryImage != null). The geometry image is
+    // set synchronously inside paint() so we cannot call
+    // markNeedsCompositingBitsUpdate() from there. However, when settings
+    // change such that the paint path changes (e.g. thickness/blur both drop to
+    // zero → _clearGeometryImage is called → predicate flips false), we need
+    // to dirty the compositing bit. Capture the pre-update state and request
+    // a re-evaluation after the value changes.
+    final wasCompositing = alwaysNeedsCompositing;
     _settings = value;
+    if (wasCompositing != alwaysNeedsCompositing) {
+      markNeedsCompositingBitsUpdate();
+    }
     markNeedsPaint();
   }
 
@@ -201,7 +212,7 @@ abstract class LiquidGlassRenderObject extends RenderProxyBox {
           : boundingBox.expandToInclude(geoBounds);
     }
 
-    if (boundingBox == null) {
+    if (boundingBox == null || boundingBox.isEmpty || !boundingBox.isFinite) {
       _clearGeometryImage();
 
       super.paint(context, offset);
@@ -338,6 +349,10 @@ abstract class LiquidGlassRenderObject extends RenderProxyBox {
           ..setFloatUniforms(initialIndex: 27, (value) {
             value.setFloat(settings.ambientRim);
           })
+          // Slot 28: uFresnelStrength — scales the natural Fresnel rim (0=off, 1=full).
+          ..setFloatUniforms(initialIndex: 28, (value) {
+            value.setFloat(settings.fresnelStrength);
+          })
           ..setImageSampler(
             1,
             geometryImage,
@@ -469,6 +484,10 @@ abstract class LiquidGlassRenderObject extends RenderProxyBox {
       // Slot 27: uAmbientRim — full-perimeter Fresnel rim boost.
       ..setFloatUniforms(initialIndex: 27, (value) {
         value.setFloat(settings.ambientRim);
+      })
+      // Slot 28: uFresnelStrength — scales the natural Fresnel rim (0=off, 1=full).
+      ..setFloatUniforms(initialIndex: 28, (value) {
+        value.setFloat(settings.fresnelStrength);
       })
       // Slot 0: captured background image (replaces the BackdropFilter read).
       ..setImageSampler(0, capture)

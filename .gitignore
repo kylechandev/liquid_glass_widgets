@@ -101,12 +101,18 @@ app.*.symbols
 # AI agent working/planning notes (not for repo)
 .agent/
 
+# Internal architectural notes, performance audits, Flutter issue drafts (not for repo)
+.internal/
+
 # Test golden failure/diff images
 test/golden/**/failures/
 
 # Root-level planning docs
 RENDERER_IMPROVEMENT_PLAN.md
 ARCHITECTURE.md
+
+# Local-only research & discussion docs (not for repo)
+docs/LIQUID_GLASS_EASY_STUDY.md
 
 # Example app — generated platform folders (not needed for a package example)
 example/android/
@@ -150,3 +156,4 @@ modal_sheet_showcase/.dart_tool/
 modal_sheet_showcase/.flutter-plugins
 modal_sheet_showcase/.flutter-plugins-dependencies
 modal_sheet_showcase/pubspec.lock
+docs/SQUIRCLE_GEOMETRY_FINDINGS.md

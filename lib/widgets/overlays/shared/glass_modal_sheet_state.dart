@@ -53,8 +53,17 @@ class _GlassModalSheetState extends State<GlassModalSheet>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    _currentStateNotifier = ValueNotifier(widget.initialState);
-    _settledState = widget.initialState;
+    // Mirror the coercion show() applies: if the caller passed an initialState
+    // that isn't in the offered detents, snap to the nearest one that is.
+    // Without this an embedded GlassModalSheet whose initialState doesn't match
+    // its detents would wedge (no orderedStates entry → no rest position).
+    final resolvedInitial = _resolveInitialState(
+      widget.initialState,
+      widget.detents,
+    );
+
+    _currentStateNotifier = ValueNotifier(resolvedInitial);
+    _settledState = resolvedInitial;
     _geometry = _buildGeometry();
 
     _animationController = AnimationController.unbounded(vsync: this);
@@ -81,7 +90,7 @@ class _GlassModalSheetState extends State<GlassModalSheet>
   void didUpdateWidget(GlassModalSheet oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.controller != oldWidget.controller) {
-      oldWidget.controller?._detach();
+      oldWidget.controller?._detach(this);
       widget.controller?._attach(this);
     }
 
@@ -102,7 +111,7 @@ class _GlassModalSheetState extends State<GlassModalSheet>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    widget.controller?._detach();
+    widget.controller?._detach(this);
     _animationController.removeListener(_progressNotifier.notify);
     _animationController.dispose();
     _progressNotifier.dispose();
@@ -133,9 +142,41 @@ class _GlassModalSheetState extends State<GlassModalSheet>
         halfSize: widget.halfSize,
         fullSize: widget.fullSize,
         peekSize: widget.peekSize,
-        enablePeek:
-            widget.enablePeek ?? (widget.mode == GlassSheetMode.persistent),
+        // Precedence lives in SheetGeometry.resolvePeek so it's unit-testable.
+        enablePeek: SheetGeometry.resolvePeek(
+          // ignore: deprecated_member_use_from_same_package
+          enablePeek: widget.enablePeek,
+          detents: widget.detents,
+          mode: widget.mode,
+        ),
+        // Public detents set → the internal per-detent bools the geometry
+        // runs on. Keeping SheetGeometry on bools leaves the physics /
+        // scroll-arena logic untouched by the surface change.
+        enableHalf: widget.detents.contains(GlassSheetDetent.medium),
+        enableFull: widget.detents.contains(GlassSheetDetent.large),
+        dismissible: widget.dismissible,
       );
+
+  /// Coerce [requested] to the nearest detent the sheet actually offers.
+  ///
+  /// Mirrors the fallback [GlassModalSheet.show] performs before pushing the
+  /// route, so that embedded [GlassModalSheet] widgets are consistent: without
+  /// this an `initialState` that isn't in [detents] leaves the sheet with no
+  /// matching rest position and it renders stuck.
+  static GlassSheetState _resolveInitialState(
+    GlassSheetState requested,
+    Set<GlassSheetDetent> detents,
+  ) {
+    if (requested == GlassSheetState.half &&
+        !detents.contains(GlassSheetDetent.medium)) {
+      return GlassSheetState.full;
+    }
+    if (requested == GlassSheetState.full &&
+        !detents.contains(GlassSheetDetent.large)) {
+      return GlassSheetState.half;
+    }
+    return requested;
+  }
 
   void _updateScreenSize() {
     final view = View.of(context);
@@ -189,7 +230,7 @@ class _GlassModalSheetState extends State<GlassModalSheet>
       _settledState = state;
       widget.onStateChanged?.call(state);
 
-      if (state != GlassSheetState.full && _scrollController.hasClients) {
+      if (state != _geometry.maxState && _scrollController.hasClients) {
         _scrollController.jumpTo(0);
       }
     }
@@ -300,6 +341,7 @@ class _GlassModalSheetState extends State<GlassModalSheet>
       event.position.dy,
       event.position.dx,
       _currentState,
+      _geometry.maxState,
       10.0,
       hasScrollClients: _scrollController.hasClients,
       canScrollListUp:
@@ -402,12 +444,36 @@ class _GlassModalSheetState extends State<GlassModalSheet>
   // ════════════════════════════════════════════════════════════════════════
 
   double get _expandProgress {
+    // No full detent → never crossfade toward the opaque full state (an
+    // over-drag above half just rubber-bands; it isn't an expansion).
+    if (!_geometry.enableFull) return 0.0;
     final halfPos =
         _geometry.positionForState(GlassSheetState.half, _screenSize.height);
     final fullPos =
         _geometry.positionForState(GlassSheetState.full, _screenSize.height);
     if (fullPos <= halfPos) return 0.0;
     return ((_currentPosition - halfPos) / (fullPos - halfPos)).clamp(0.0, 1.0);
+  }
+
+  /// Progress (0→1) toward the topmost detent, measured from the detent just
+  /// below it. Gates inner content scrolling — the content becomes scrollable
+  /// only once the sheet is at the detent it can't grow past. For a normal
+  /// sheet this tracks half→full (identical to [_expandProgress]); for a
+  /// half-only sheet it tracks the approach to half so its content still
+  /// scrolls, whereas [_expandProgress] stays 0 there to keep the glass look —
+  /// which is exactly why the scroll gate needs its own signal.
+  double get _contentScrollProgress {
+    final states = _geometry.orderedStates;
+    // A sheet with only one rest state (e.g. the release fallback that adds
+    // `half` when all detents are disabled) is always at its max — treat its
+    // content as immediately scrollable rather than gating on a transition
+    // that can never happen.
+    if (states.length < 2) return 1.0;
+    final maxPos = _geometry.positionForState(states.last, _screenSize.height);
+    final prevPos = _geometry.positionForState(
+        states[states.length - 2], _screenSize.height);
+    if (maxPos <= prevPos) return 0.0;
+    return ((_currentPosition - prevPos) / (maxPos - prevPos)).clamp(0.0, 1.0);
   }
 
   _RenderMetrics _calculateMetrics({
@@ -475,17 +541,28 @@ class _GlassModalSheetState extends State<GlassModalSheet>
       final tProgress =
           range > 0.0001 ? ((pos - peekPos) / range).clamp(0.0, 1.0) : 1.0;
 
-      effectiveSettings = LiquidGlassSettings.lerp(sPeek, sHalf, tProgress);
-      currentExpandedColor = Color.lerp(cPeek, cHalf, tProgress)!;
-
-      if (sPeek.blur > 0 && sHalf.blur == 0) {
-        colorOpacity = tProgress;
-      } else if (sPeek.blur == 0 && sHalf.blur > 0) {
-        colorOpacity = 1.0 - tProgress;
-      } else if (sPeek.blur == 0 && sHalf.blur == 0) {
-        colorOpacity = 1.0;
+      if (!_geometry.enablePeek) {
+        // Peek-less: below half is the dismiss slide, not a peek morph. Hold
+        // the half state's own surface so the sheet slides away solid (Apple
+        // keeps the surface opaque and just translates it off — only the
+        // background dim fades) rather than fading toward a peek that doesn't
+        // exist. Solid glass stays glass; a solid-fill half stays filled.
+        effectiveSettings = sHalf;
+        currentExpandedColor = cHalf;
+        colorOpacity = sHalf.blur == 0 ? 1.0 : 0.0;
       } else {
-        colorOpacity = 0.0;
+        effectiveSettings = LiquidGlassSettings.lerp(sPeek, sHalf, tProgress);
+        currentExpandedColor = Color.lerp(cPeek, cHalf, tProgress)!;
+
+        if (sPeek.blur > 0 && sHalf.blur == 0) {
+          colorOpacity = tProgress;
+        } else if (sPeek.blur == 0 && sHalf.blur > 0) {
+          colorOpacity = 1.0 - tProgress;
+        } else if (sPeek.blur == 0 && sHalf.blur == 0) {
+          colorOpacity = 1.0;
+        } else {
+          colorOpacity = 0.0;
+        }
       }
       glassOpacity = 1.0 - colorOpacity;
     } else {
@@ -743,8 +820,8 @@ class _GlassModalSheetState extends State<GlassModalSheet>
     // persists correctly without an external key.
     final focusBridge = Focus(
       onFocusChange: (hasFocus) {
-        if (hasFocus && _currentState != GlassSheetState.full) {
-          _snapToState(GlassSheetState.full);
+        if (hasFocus && _currentState != _geometry.maxState) {
+          _snapToState(_geometry.maxState);
         }
       },
       child: widget.child,
@@ -833,14 +910,15 @@ class _GlassModalSheetState extends State<GlassModalSheet>
           scrollController: _scrollController,
           currentStateNotifier: _currentStateNotifier,
           expandProgressValue: t,
+          contentScrollProgress: _contentScrollProgress,
           maintainContentGlass: widget.maintainContentGlass,
           fullStateContentSettings: widget.fullStateContentSettings,
           enableSaturationGlow: widget.enableSaturationGlow,
           enableTopFade: widget.enableTopFade,
           topFadeHeight: widget.topFadeHeight,
           onFocusGained: () {
-            if (_currentState != GlassSheetState.full) {
-              _snapToState(GlassSheetState.full);
+            if (_currentState != _geometry.maxState) {
+              _snapToState(_geometry.maxState);
             }
           },
           suppressInteractionOnChildren: widget.suppressInteractionOnChildren,

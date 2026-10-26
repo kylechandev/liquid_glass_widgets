@@ -2,6 +2,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
 
+import '../../constants/glass_defaults.dart';
 import '../../src/renderer/liquid_glass_renderer.dart';
 
 import '../../src/types/glass_interaction_behavior.dart';
@@ -10,6 +11,7 @@ import '../shared/inherited_liquid_glass.dart';
 import 'glass_bottom_bar.dart'
     show
         GlassBottomBar,
+        GlassBottomBarCollapseConfig,
         GlassTabBarExtraButton,
         GlassBottomBarTab,
         GlassTabPillAnchor,
@@ -145,6 +147,8 @@ class GlassTabBar extends StatefulWidget {
     required ValueChanged<int> onTabSelected,
     Key? key,
     GlassTabBarExtraButton? extraButton,
+    GlassBottomBarCollapseConfig? collapseConfig,
+    ScrollController? scrollController,
     double spacing = 8,
     double horizontalPadding = 20,
     double verticalPadding = 20,
@@ -197,6 +201,8 @@ class GlassTabBar extends StatefulWidget {
           selectedIndex: selectedIndex,
           onTabSelected: onTabSelected,
           extraButton: extraButton,
+          collapseConfig: collapseConfig,
+          scrollController: scrollController,
           spacing: spacing,
           horizontalPadding: horizontalPadding,
           verticalPadding: verticalPadding,
@@ -350,7 +356,7 @@ class GlassTabBar extends StatefulWidget {
           indicatorColor: indicatorColor,
           indicatorSettings: indicatorSettings,
           indicatorPinchStrength: indicatorPinchStrength,
-          indicatorBorderRadius: indicatorBorderRadius ?? barBorderRadius,
+          indicatorBorderRadius: indicatorBorderRadius,
           selectedIconColor: selectedIconColor,
           unselectedIconColor: unselectedIconColor,
           selectedLabelColor: selectedLabelColor,
@@ -557,6 +563,7 @@ class GlassTabBar extends StatefulWidget {
       this.tabWidth,
       this.indicatorBorderRadius,
       this.extraButton,
+      this.collapseConfig,
       this.interactionBehavior = GlassInteractionBehavior.full,
       this.pressScale = 1.04,
       this.interactionGlowColor,
@@ -582,6 +589,12 @@ class GlassTabBar extends StatefulWidget {
         assert(
           selectedIndex >= 0 && selectedIndex < tabs.length,
           'selectedIndex must be within bounds of tabs list',
+        ),
+        assert(
+          placement != _GlassTabBarPlacement.bottom ||
+              collapseConfig == null ||
+              extraButton != null,
+          'GlassTabBar.bottom collapseConfig requires extraButton.',
         );
 
   /// List of tabs to display.
@@ -669,10 +682,19 @@ class GlassTabBar extends StatefulWidget {
   // ---------------------------------------------------------------------------
   final _GlassTabBarPlacement _placement;
 
-  // ---------------------------------------------------------------------------
-  // Default border radius for bottom/searchable constructors
-  // ---------------------------------------------------------------------------
-  static const double _kDefaultBottomBorderRadius = 32.0;
+  // GlassDefaults.capsuleRadius is intentional: Flutter's RoundedRectangleBorder
+  // clamps the radius to min(r, halfHeight), so any value ≥ halfHeight produces
+  // a stadium/capsule. Using a large sentinel means the default capsule look
+  // holds at ANY barHeight — if we used 32, a user who sets barHeight: 100 would
+  // get visible corners (capsule threshold = 50 > 32) without setting
+  // barBorderRadius explicitly.
+  //
+  // The indicator also receives GlassDefaults.capsuleRadius when the bar is a
+  // capsule — the internal "barRadius >= capsuleRadius" guard passes it through
+  // directly rather than doing capsuleRadius - 4. This ensures the glass shader
+  // always clamps to a true capsule even during jelly-bloom expansion, where
+  // the pill canvas grows beyond its rest height.
+  static const double _kDefaultBottomBorderRadius = GlassDefaults.capsuleRadius;
 
   // ---------------------------------------------------------------------------
   // Bottom / searchable fields (all have defaults — safe for inline too)
@@ -741,6 +763,9 @@ class GlassTabBar extends StatefulWidget {
   /// Optional extra action button (bottom/searchable only).
   final GlassTabBarExtraButton? extraButton;
 
+  /// Optional vertical-swipe collapse behavior for [GlassTabBar.bottom].
+  final GlassBottomBarCollapseConfig? collapseConfig;
+
   /// Which physical interaction effects are active. Defaults to [GlassInteractionBehavior.full].
   final GlassInteractionBehavior interactionBehavior;
 
@@ -799,7 +824,7 @@ class GlassTabBar extends StatefulWidget {
   /// Maximum whitening amount. Defaults to 1.0.
   final double whitenAtBottomTarget;
 
-  /// Scroll controller wired for whitening + minimize behaviour.
+  /// Scroll controller wired for searchable whitening and bottom-bar collapse.
   final ScrollController? scrollController;
 
   @override
@@ -827,20 +852,12 @@ class _GlassTabBarState extends State<GlassTabBar> {
 
   /// Dispatches to [TabBarBottomLayout] — the iOS 26-style bottom placement engine.
   Widget _buildBottom(BuildContext context) {
-    final tabs = widget.tabs
-        .map((t) => GlassBottomBarTab(
-              icon: t.icon ?? const SizedBox.shrink(),
-              label: t.label,
-              activeIcon: t.activeIcon,
-              glowColor: t.glowColor,
-              thickness: t.thickness,
-            ))
-        .toList();
     return TabBarBottomLayout(
-      tabs: tabs,
+      tabs: widget.tabs,
       selectedIndex: widget.selectedIndex,
       onTabSelected: widget.onTabSelected,
       extraButton: widget.extraButton,
+      collapseConfig: widget.collapseConfig,
       spacing: widget.spacing,
       horizontalPadding: widget.horizontalPadding,
       verticalPadding: widget.verticalPadding,
@@ -884,6 +901,7 @@ class _GlassTabBarState extends State<GlassTabBar> {
       adaptiveBrightness: widget.adaptiveBrightness,
       onBrightnessChanged: widget.onBrightnessChanged,
       brightnessOverride: widget.brightnessOverride,
+      scrollController: widget.scrollController,
       springDescription: widget.springDescription,
     );
   }
@@ -894,17 +912,8 @@ class _GlassTabBarState extends State<GlassTabBar> {
   /// The track glass comes from [AdaptiveGlass.grouped] inside [TabBarBottomLayout]
   /// exactly as in the bottom placement — no new rendering path needed.
   Widget _buildInline(BuildContext context) {
-    final tabs = widget.tabs
-        .map((t) => GlassBottomBarTab(
-              icon: t.icon ?? const SizedBox.shrink(),
-              label: t.label,
-              activeIcon: t.activeIcon,
-              glowColor: t.glowColor,
-              thickness: t.thickness,
-            ))
-        .toList();
     return TabBarBottomLayout(
-      tabs: tabs,
+      tabs: widget.tabs,
       selectedIndex: widget.selectedIndex,
       onTabSelected: widget.onTabSelected,
       spacing: widget.spacing,
@@ -957,17 +966,8 @@ class _GlassTabBarState extends State<GlassTabBar> {
 
   /// Dispatches to [TabBarSearchableLayout] — the iOS 26-style searchable placement engine.
   Widget _buildSearchable(BuildContext context) {
-    final tabs = widget.tabs
-        .map((t) => GlassBottomBarTab(
-              icon: t.icon ?? const SizedBox.shrink(),
-              label: t.label,
-              activeIcon: t.activeIcon,
-              glowColor: t.glowColor,
-              thickness: t.thickness,
-            ))
-        .toList();
     return TabBarSearchableLayout(
-      tabs: tabs,
+      tabs: widget.tabs,
       selectedIndex: widget.selectedIndex,
       onTabSelected: widget.onTabSelected,
       searchConfig: widget.searchConfig!,

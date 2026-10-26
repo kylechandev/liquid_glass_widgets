@@ -103,6 +103,7 @@ export 'widgets/overlays/glass_modal_sheet.dart'
         GlassModalSheet,
         GlassSheetState,
         GlassSheetMode,
+        GlassSheetDetent, // the `detents` set on GlassModalSheet / .show()
         GlassFillTransition,
         GlassModalSheetController,
         GlassModalSheetScaffold, // used directly for maps-style hit-through layouts
@@ -111,6 +112,8 @@ export 'widgets/overlays/glass_modal_sheet.dart'
         ScrollControllerProvider; // access scroll controller from sheet content
 export 'widgets/overlays/glass_toast.dart';
 export 'widgets/overlays/glass_popover.dart';
+// Widgets - Effects
+export 'widgets/effects/progressive_blur.dart';
 // Widgets - Surfaces
 export 'widgets/surfaces/glass_app_bar.dart';
 export 'widgets/surfaces/glass_large_title.dart';

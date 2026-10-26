@@ -250,6 +250,14 @@ class GlassScaffold extends StatelessWidget {
   /// Defaults to `true`, matching iOS 26's design where content scrolls
   /// behind the transparent navigation bar. When `false`, the body occupies
   /// only the area between the bars (no overlap, no edge fading).
+  ///
+  /// Set to `false` when the body widget manages its own internal layout
+  /// and does not know to add a manual top spacer for the app bar — for
+  /// example, a third-party chat widget, a full-screen form, or any widget
+  /// that renders to the full height of the space it is given. With
+  /// `extendBody: false` the scaffold positions the body precisely between
+  /// the bottom of the app bar and the top of the bottom bar, so the widget
+  /// fills exactly the visible content area without being obscured.
   final bool extendBody;
 
   /// The preferred height of the app bar, used for padding calculations.
@@ -394,6 +402,10 @@ class GlassScaffold extends StatelessWidget {
         fadeTop: doFadeTop,
         fadeBottom: doFadeBottom,
         style: edgeStyle,
+        // Pass the explicit background colour so the async-capture fallback
+        // gradient uses the correct colour in dark mode instead of defaulting
+        // to CupertinoTheme.scaffoldBackgroundColor (which is near-black).
+        fadeColor: backgroundColor,
         child: bodyContent,
       );
     }
@@ -529,7 +541,8 @@ class GlassScaffold extends StatelessWidget {
       GlassStatusBarStyle.none => true, // doesn't matter — no region
     };
 
-    Widget stackWidget = Stack(children: stackChildren);
+    Widget stackWidget =
+        Stack(clipBehavior: Clip.none, children: stackChildren);
 
     // Wrap in GlassContentAwareScope when content-aware brightness is on.
     // The scope must be an ancestor of both the sampled body
@@ -539,12 +552,21 @@ class GlassScaffold extends StatelessWidget {
       stackWidget = GlassContentAwareScope(child: stackWidget);
     }
 
+    // Resolve effective background: explicit widget > backgroundColor colour >
+    // null (Scaffold inherits Theme.scaffoldBackgroundColor).
+    final Widget? effectiveBackground = background ??
+        (backgroundColor != null
+            ? SizedBox.expand(
+                child: ColoredBox(color: backgroundColor!),
+              )
+            : null);
+
     Widget scaffold = Scaffold(
-      // Only force transparent when a background widget is provided — mirrors
-      // GlassPage's own logic. Without a background the Scaffold should
-      // inherit Theme.scaffoldBackgroundColor so callers can control the
-      // page colour through the standard Material theme.
-      backgroundColor: background != null ? Colors.transparent : null,
+      // Only force transparent when GlassPage will render a background widget
+      // behind the scaffold. When no background is provided the scaffold must
+      // be opaque so that MaterialPageRoute transitions don't show the
+      // underlying route through the incoming page.
+      backgroundColor: effectiveBackground != null ? Colors.transparent : null,
       resizeToAvoidBottomInset: resizeToAvoidBottomInset,
       floatingActionButton: floatingActionButton,
       body: stackWidget,
@@ -560,15 +582,6 @@ class GlassScaffold extends StatelessWidget {
         child: scaffold,
       );
     }
-
-    // Resolve effective background: explicit widget > backgroundColor colour >
-    // null (Scaffold inherits Theme.scaffoldBackgroundColor).
-    final Widget? effectiveBackground = background ??
-        (backgroundColor != null
-            ? SizedBox.expand(
-                child: ColoredBox(color: backgroundColor!),
-              )
-            : null);
 
     return GlassPage(
       background: effectiveBackground,

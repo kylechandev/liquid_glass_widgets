@@ -188,11 +188,21 @@ class _GlassMenuState extends State<GlassMenu> with TickerProviderStateMixin {
               ),
             ),
 
-            // Overlay portal for morphing animation
-            // The overlay contents fade out during the handoff so the real button shows instead
+            // Overlay portal for morphing animation.
+            // The overlay contents fade out during the handoff so the real button shows instead.
+            //
+            // Target the ROOT overlay: the morph is placed with absolute,
+            // root-relative coordinates (the trigger's localToGlobal(Offset.zero)),
+            // so it must render in the overlay that shares that coordinate space.
+            // Rendering into a *nested* overlay (e.g. a ShellRoute / nested-Navigator
+            // content area offset by a side rail) shifts the menu by that overlay's
+            // origin — the trigger's global position gets double-counted. The root
+            // overlay always coincides with the global coordinate space, so the menu
+            // lands exactly on its trigger in every embedding.
             OverlayPortal(
               controller: _overlayController,
               overlayChildBuilder: _buildMorphingOverlay,
+              overlayLocation: OverlayChildLocation.rootOverlay,
             ),
           ],
         );
@@ -476,7 +486,7 @@ class _GlassMenuState extends State<GlassMenu> with TickerProviderStateMixin {
                             platformViewBackdrop: widget.platformViewBackdrop,
                             width: tw,
                             height: th,
-                            shape: LiquidRoundedSuperellipse(
+                            shape: LiquidRoundedRectangle(
                               borderRadius: _triggerBorderRadius ??
                                   _triggerSize!.shortestSide / 2.0,
                             ),
@@ -580,7 +590,7 @@ class _GlassMenuState extends State<GlassMenu> with TickerProviderStateMixin {
     // No more faking the shape with tall, thin rectangles! Let the shader do the work.
 
     // Build the shape
-    final teardropShape = LiquidRoundedSuperellipse(
+    final teardropShape = LiquidRoundedRectangle(
       borderRadius: currentRadius,
     );
 

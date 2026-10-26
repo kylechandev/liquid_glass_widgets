@@ -7,6 +7,7 @@
 //
 // Do NOT import this file directly — use [GlassTabBar.bottom()] instead.
 
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
@@ -18,7 +19,13 @@ import '../../shared/glass_content_aware_scope.dart';
 import '../../../theme/glass_theme_data.dart';
 import '../../../theme/glass_theme_helpers.dart';
 import '../glass_bottom_bar.dart'
-    show GlassTabBarExtraButton, GlassBottomBarTab, MaskingQuality;
+    show
+        GlassBottomBarCollapseConfig,
+        GlassBottomBarCollapseDirection,
+        GlassExtraButtonPlacement,
+        GlassTabBarExtraButton,
+        MaskingQuality;
+import '../glass_tab_bar.dart' show GlassTab;
 import 'tab_bar_bottom_internal.dart'
     show
         BottomBarExtraBtn,
@@ -39,6 +46,7 @@ class TabBarBottomLayout extends StatefulWidget {
     required this.onTabSelected,
     super.key,
     this.extraButton,
+    this.collapseConfig,
     this.spacing = 8,
     this.horizontalPadding = 20,
     this.verticalPadding = 20,
@@ -83,15 +91,17 @@ class TabBarBottomLayout extends StatefulWidget {
     this.adaptiveBrightness = false,
     this.onBrightnessChanged,
     this.brightnessOverride,
+    this.scrollController,
     this.springDescription,
   });
 
   static const double _kDefaultBorderRadius = 32.0;
 
-  final List<GlassBottomBarTab> tabs;
+  final List<GlassTab> tabs;
   final int selectedIndex;
   final ValueChanged<int> onTabSelected;
   final GlassTabBarExtraButton? extraButton;
+  final GlassBottomBarCollapseConfig? collapseConfig;
   final double spacing;
   final double horizontalPadding;
   final double verticalPadding;
@@ -135,16 +145,45 @@ class TabBarBottomLayout extends StatefulWidget {
   final bool adaptiveBrightness;
   final ValueChanged<Brightness>? onBrightnessChanged;
   final ValueListenable<Brightness>? brightnessOverride;
+  final ScrollController? scrollController;
   final SpringDescription? springDescription;
 
   @override
   State<TabBarBottomLayout> createState() => _TabBarBottomLayoutState();
 }
 
-class _TabBarBottomLayoutState extends State<TabBarBottomLayout> {
+class _TabBarBottomLayoutState extends State<TabBarBottomLayout>
+    with TickerProviderStateMixin {
   // Delegate to the shared const — single source of truth in tab_bar_bottom_internal.dart.
   // Both bars reference kBottomBarGlassDefaults so their glass is guaranteed identical.
   static const _defaultGlassSettings = kBottomBarGlassDefaults;
+  static const _kCollapsedTabSize = 0.01;
+  static const _kCollapseCurve = Curves.easeOutCubic;
+  static const _kExpandCurve = Curves.easeOutBack;
+  static const _kExtraButtonCollapseDelay = 0.08;
+  static const _kSwipeVelocityThreshold = 250.0;
+  static const _kGestureRegionKey = ValueKey<String>(
+    'glass_bottom_bar_gesture_region',
+  );
+  static const _kTabPillKey = ValueKey<String>('glass_bottom_bar_tab_pill');
+  static const _kExtraButtonScaleKey = ValueKey<String>(
+    'glass_bottom_bar_extra_button_scale',
+  );
+  static const _kScrollDeltaThreshold = 12.0;
+
+  bool _isCollapsed = false;
+  double? _lastScrollPixels;
+  late final AnimationController _collapseController;
+
+  bool get _collapseEnabled =>
+      widget.collapseConfig != null && widget.extraButton != null;
+  bool get _scrollCollapseEnabled =>
+      _collapseEnabled && widget.scrollController != null;
+  Duration get _collapseDuration =>
+      widget.collapseConfig?.animationDuration ??
+      const Duration(milliseconds: 280);
+  double get _collapsedExtraButtonScale =>
+      widget.collapseConfig?.collapsedExtraButtonScale ?? 0.9;
 
   /// Lays out the tab [Row] in physical (LTR) order regardless of the ambient
   /// direction, so the first child is on the left — matching the indicator and
@@ -156,6 +195,182 @@ class _TabBarBottomLayoutState extends State<TabBarBottomLayout> {
     return Directionality(
       textDirection: TextDirection.ltr,
       child: Row(children: children),
+    );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _collapseController = AnimationController(
+      vsync: this,
+      value: _isCollapsed ? 1.0 : 0.0,
+      lowerBound: 0.0,
+      upperBound: 1.0,
+    );
+    widget.scrollController?.addListener(_handleScrollChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _syncScrollBaseline());
+  }
+
+  @override
+  void didUpdateWidget(covariant TabBarBottomLayout oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_collapseEnabled && _isCollapsed) {
+      _isCollapsed = false;
+    }
+    if (oldWidget.scrollController != widget.scrollController) {
+      oldWidget.scrollController?.removeListener(_handleScrollChanged);
+      _lastScrollPixels = null;
+      widget.scrollController?.addListener(_handleScrollChanged);
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _syncScrollBaseline());
+    }
+  }
+
+  @override
+  void dispose() {
+    _collapseController.dispose();
+    widget.scrollController?.removeListener(_handleScrollChanged);
+    super.dispose();
+  }
+
+  void _collapse() {
+    if (!_collapseEnabled || _isCollapsed) return;
+    setState(() => _isCollapsed = true);
+    _collapseController.animateTo(
+      1.0,
+      duration: _collapseDuration,
+      curve: Curves.linear,
+    );
+  }
+
+  void _expand() {
+    if (!_isCollapsed) return;
+    setState(() => _isCollapsed = false);
+    _collapseController.animateTo(
+      0.0,
+      duration: _collapseDuration,
+      curve: Curves.linear,
+    );
+  }
+
+  void _handleVerticalDragEnd(DragEndDetails details) {
+    if (!_collapseEnabled) return;
+    final velocity = details.primaryVelocity ?? 0.0;
+    if (velocity <= -_kSwipeVelocityThreshold) {
+      _collapse();
+    } else if (velocity >= _kSwipeVelocityThreshold) {
+      _expand();
+    }
+  }
+
+  void _syncScrollBaseline() {
+    if (!mounted) return;
+    final controller = widget.scrollController;
+    if (controller == null || !controller.hasClients) return;
+    _lastScrollPixels = controller.position.pixels;
+  }
+
+  void _handleScrollChanged() {
+    if (!_scrollCollapseEnabled) return;
+    final controller = widget.scrollController;
+    if (controller == null || !controller.hasClients) return;
+
+    final position = controller.position;
+    final currentPixels = position.pixels;
+    final previousPixels = _lastScrollPixels;
+    _lastScrollPixels = currentPixels;
+
+    if (previousPixels == null || position.outOfRange) return;
+
+    final delta = currentPixels - previousPixels;
+    if (delta >= _kScrollDeltaThreshold) {
+      _collapse();
+    } else if (delta <= -_kScrollDeltaThreshold) {
+      _expand();
+    }
+  }
+
+  double _collapsedTabLeft({
+    required bool extraOnLeft,
+    required double expandedLeft,
+    required double expandedWidth,
+    required double extraButtonSize,
+  }) {
+    if (_collapseTowardsExtraButton()) {
+      final extraLeft =
+          extraOnLeft ? 0.0 : expandedLeft + expandedWidth + widget.spacing;
+      return extraLeft + (extraButtonSize - _kCollapsedTabSize) / 2;
+    }
+
+    final collapseTowardsRightEdge =
+        _collapseTowardsRightEdge(extraOnLeft: extraOnLeft);
+    if (!collapseTowardsRightEdge) {
+      final leftGapToRemove = extraOnLeft ? widget.spacing : 0.0;
+      return math.max(0.0, expandedLeft - leftGapToRemove);
+    }
+
+    final rightGapToRemove = extraOnLeft ? 0.0 : widget.spacing;
+    return expandedLeft +
+        math.max(
+          0.0,
+          expandedWidth + rightGapToRemove - _kCollapsedTabSize,
+        );
+  }
+
+  bool _collapseTowardsExtraButton() {
+    if (!_collapseEnabled) return false;
+    return widget.collapseConfig!.direction ==
+        GlassBottomBarCollapseDirection.towardsExtraButton;
+  }
+
+  bool _collapseTowardsRightEdge({required bool extraOnLeft}) {
+    if (!_collapseEnabled) return false;
+    final direction = widget.collapseConfig!.direction;
+    return extraOnLeft
+        ? direction == GlassBottomBarCollapseDirection.awayFromExtraButton
+        : direction == GlassBottomBarCollapseDirection.towardsExtraButton;
+  }
+
+  Alignment _collapsedContentAlignment({required bool extraOnLeft}) {
+    return _collapseTowardsRightEdge(extraOnLeft: extraOnLeft)
+        ? Alignment.centerRight
+        : Alignment.centerLeft;
+  }
+
+  double _pillCollapseProgress() {
+    final raw = _collapseController.value;
+    if (_isCollapsed) return _kCollapseCurve.transform(raw);
+    final expandedT = _kExpandCurve.transform(1.0 - raw);
+    return 1.0 - expandedT;
+  }
+
+  double _extraButtonCollapseProgress() {
+    final raw = _collapseController.value;
+    if (_isCollapsed) {
+      final delayed = ((raw - _kExtraButtonCollapseDelay) /
+              (1.0 - _kExtraButtonCollapseDelay))
+          .clamp(0.0, 1.0)
+          .toDouble();
+      return _kCollapseCurve.transform(delayed);
+    }
+    final expandedT = _kCollapseCurve.transform(1.0 - raw);
+    return 1.0 - expandedT;
+  }
+
+  GlassTabBarExtraButton _resolvedExtraButtonConfig() {
+    final config = widget.extraButton!;
+    if (!_isCollapsed || !(widget.collapseConfig?.expandOnTap ?? false)) {
+      return config;
+    }
+    return GlassTabBarExtraButton(
+      icon: config.icon,
+      onTap: _expand,
+      label: config.label,
+      iconColor: config.iconColor,
+      size: config.size,
+      placement: config.placement,
+      position: config.position,
+      collapseOnSearchFocus: config.collapseOnSearchFocus,
     );
   }
 
@@ -248,8 +463,15 @@ class _TabBarBottomLayoutState extends State<TabBarBottomLayout> {
         ),
         child: LayoutBuilder(
           builder: (context, constraints) {
-            final extraBtnW = widget.extraButton != null
-                ? widget.extraButton!.size + widget.spacing
+            final resolvedExtraButton = widget.extraButton != null
+                ? _resolvedExtraButtonConfig()
+                : null;
+            final extraPlacement = resolvedExtraButton?.placement ??
+                GlassExtraButtonPlacement.right;
+            final extraOnLeft =
+                extraPlacement == GlassExtraButtonPlacement.left;
+            final extraBtnW = resolvedExtraButton != null
+                ? resolvedExtraButton.size + widget.spacing
                 : 0.0;
             final maxTabW = constraints.maxWidth - extraBtnW;
             final tabPillW = resolveTabPillWidth(
@@ -257,124 +479,202 @@ class _TabBarBottomLayoutState extends State<TabBarBottomLayout> {
               tabCount: tabs.length,
               maxAvailable: maxTabW,
             );
+            final expandedTabLeft = extraOnLeft ? extraBtnW : 0.0;
+            final collapsedContentAlignment =
+                _collapsedContentAlignment(extraOnLeft: extraOnLeft);
 
-            return SizedBox(
+            final content = SizedBox(
+              key: _kGestureRegionKey,
               height: widget.barHeight,
-              child: Builder(
-                builder: (context) {
-                  return Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      // 1. Optional extra button — painted first (bottom of z-order).
-                      // Pinned to the trailing edge. Painted before the tab pill
-                      // so the jelly indicator's glass effect correctly overlaps and
-                      // refracts the extra button during horizontal stretch physics.
-                      if (widget.extraButton != null)
-                        Positioned(
-                          right: 0,
+              child: AnimatedBuilder(
+                animation: _collapseController,
+                builder: (context, _) {
+                  final collapsedTabLeft = _collapseEnabled
+                      ? _collapsedTabLeft(
+                          extraOnLeft: extraOnLeft,
+                          expandedLeft: expandedTabLeft,
+                          expandedWidth: tabPillW,
+                          extraButtonSize: resolvedExtraButton!.size,
+                        )
+                      : expandedTabLeft;
+                  final pillProgress = _pillCollapseProgress();
+                  final extraProgress = _extraButtonCollapseProgress();
+                  final tabLeft = ui.lerpDouble(
+                      expandedTabLeft, collapsedTabLeft, pillProgress)!;
+                  final tabWidth = ui.lerpDouble(
+                      tabPillW, _kCollapsedTabSize, pillProgress)!;
+                  final tabHeight = ui.lerpDouble(
+                    widget.barHeight,
+                    _kCollapsedTabSize,
+                    pillProgress,
+                  )!;
+                  final tabTop = (widget.barHeight - tabHeight) / 2;
+                  final extraScale = ui.lerpDouble(
+                    1.0,
+                    _collapsedExtraButtonScale,
+                    extraProgress,
+                  )!;
+                  final extraShouldOverlayPill = resolvedExtraButton != null &&
+                      pillProgress > 0 &&
+                      _collapseTowardsExtraButton();
+
+                  final extraButton = resolvedExtraButton != null
+                      ? Positioned(
+                          left: extraOnLeft ? 0 : null,
+                          right: extraOnLeft ? null : 0,
                           top: 0,
                           bottom: 0,
                           child: SizedBox(
-                            width: widget.extraButton!.size,
+                            width: resolvedExtraButton.size,
                             height: widget.barHeight,
-                            child: BottomBarExtraBtn(
-                              config: widget.extraButton!,
+                            child: ScaleTransition(
+                              key: _kExtraButtonScaleKey,
+                              scale: AlwaysStoppedAnimation<double>(extraScale),
+                              child: BottomBarExtraBtn(
+                                config: resolvedExtraButton,
+                                quality: effectiveQuality,
+                                iconColor: resolvedExtraButton.iconColor ??
+                                    resolvedUnselectedIconColor,
+                                enableBlend: widget.enableBlend,
+                                borderRadius: widget.barBorderRadius ==
+                                        TabBarBottomLayout._kDefaultBorderRadius
+                                    ? null
+                                    : widget.barBorderRadius,
+                                platformViewBackdrop:
+                                    widget.platformViewBackdrop,
+                              ),
+                            ),
+                          ),
+                        )
+                      : null;
+
+                  final tabPill = Positioned(
+                    left: tabLeft,
+                    top: tabTop,
+                    width: tabWidth,
+                    height: tabHeight,
+                    child: KeyedSubtree(
+                      key: _kTabPillKey,
+                      child: IgnorePointer(
+                        ignoring: _isCollapsed,
+                        // Keep the morphing pill un-clipped so its press
+                        // interaction can overflow horizontally the same
+                        // way GlassTabBar.searchable does.
+                        child: FittedBox(
+                          fit: BoxFit.fill,
+                          alignment: collapsedContentAlignment,
+                          child: SizedBox(
+                            width: tabPillW,
+                            height: widget.barHeight,
+                            child: TabIndicator(
                               quality: effectiveQuality,
-                              iconColor: widget.extraButton!.iconColor ??
-                                  resolvedUnselectedIconColor,
-                              enableBlend: widget.enableBlend,
-                              borderRadius: widget.barBorderRadius ==
-                                      TabBarBottomLayout._kDefaultBorderRadius
-                                  ? null
-                                  : widget.barBorderRadius,
+                              springDescription: widget.springDescription,
+                              visible: widget.showIndicator,
+                              tabIndex: selectedIndex,
+                              tabCount: tabs.length,
+                              indicatorColor: widget.indicatorColor,
+                              indicatorSettings: widget.indicatorSettings,
+                              indicatorPinchStrength:
+                                  widget.indicatorPinchStrength,
+                              onTabChanged: onTabSelected,
+                              barHeight: widget.barHeight,
+                              barBorderRadius: widget.barBorderRadius,
+                              indicatorBorderRadius:
+                                  widget.indicatorBorderRadius,
+                              tabPadding: widget.tabPadding,
+                              backgroundKey: widget.backgroundKey,
+                              maskingQuality: widget.maskingQuality,
+                              indicatorExpansion: widget.indicatorExpansion,
                               platformViewBackdrop: widget.platformViewBackdrop,
+                              interactionGlowColor:
+                                  widget.interactionBehavior.hasGlow
+                                      ? effectiveInteractionGlowColor
+                                      : const Color(0x00000000),
+                              interactionGlowRadius:
+                                  widget.interactionGlowRadius,
+                              interactionGlowBlurRadius:
+                                  effectiveGlowBlurRadius,
+                              interactionGlowSpreadRadius:
+                                  effectiveGlowSpreadRadius,
+                              interactionGlowOpacity: effectiveGlowOpacity,
+                              interactionScale:
+                                  widget.interactionBehavior.hasScale
+                                      ? widget.pressScale
+                                      : 1.0,
+                              childUnselected: _ltrTabRow(
+                                children: [
+                                  for (var i = 0; i < tabs.length; i++)
+                                    Expanded(
+                                      child: BottomBarTabItem(
+                                        tab: tabs[i],
+                                        selected: false,
+                                        selectedIconColor:
+                                            resolvedSelectedIconColor,
+                                        unselectedIconColor:
+                                            resolvedUnselectedIconColor,
+                                        selectedLabelColor:
+                                            widget.selectedLabelColor,
+                                        unselectedLabelColor:
+                                            widget.unselectedLabelColor,
+                                        selectedLabelStyle:
+                                            widget.selectedLabelStyle,
+                                        unselectedLabelStyle:
+                                            widget.unselectedLabelStyle,
+                                        iconSize: widget.iconSize,
+                                        labelFontSize: widget.labelFontSize,
+                                        textStyle: widget.textStyle,
+                                        iconLabelSpacing:
+                                            widget.iconLabelSpacing,
+                                        glowDuration: widget.glowDuration,
+                                        glowBlurRadius: widget.glowBlurRadius,
+                                        glowSpreadRadius:
+                                            widget.glowSpreadRadius,
+                                        glowOpacity: widget.glowOpacity,
+                                        semanticsSelected: i == selectedIndex,
+                                        onTap: null,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                              selectedTabBuilder: (context, intensity,
+                                      alignment) =>
+                                  _buildSelectedTabs(
+                                      intensity,
+                                      alignment,
+                                      tabs,
+                                      resolvedSelectedIconColor,
+                                      resolvedUnselectedIconColor),
+                              magnification: widget.magnification,
+                              innerBlur: widget.innerBlur,
                             ),
                           ),
                         ),
-
-                      // 2. Tab pill — painted last (top of z-order).
-                      Positioned(
-                        left: 0,
-                        top: 0,
-                        width: tabPillW,
-                        height: widget.barHeight,
-                        child: TabIndicator(
-                          quality: effectiveQuality,
-                          springDescription: widget.springDescription,
-                          visible: widget.showIndicator,
-                          tabIndex: selectedIndex,
-                          tabCount: tabs.length,
-                          indicatorColor: widget.indicatorColor,
-                          indicatorSettings: widget.indicatorSettings,
-                          indicatorPinchStrength: widget.indicatorPinchStrength,
-                          onTabChanged: onTabSelected,
-                          barHeight: widget.barHeight,
-                          barBorderRadius: widget.barBorderRadius,
-                          indicatorBorderRadius: widget.indicatorBorderRadius,
-                          tabPadding: widget.tabPadding,
-                          backgroundKey: widget.backgroundKey,
-                          maskingQuality: widget.maskingQuality,
-                          indicatorExpansion: widget.indicatorExpansion,
-                          platformViewBackdrop: widget.platformViewBackdrop,
-                          interactionGlowColor:
-                              widget.interactionBehavior.hasGlow
-                                  ? effectiveInteractionGlowColor
-                                  : const Color(0x00000000),
-                          interactionGlowRadius: widget.interactionGlowRadius,
-                          interactionGlowBlurRadius: effectiveGlowBlurRadius,
-                          interactionGlowSpreadRadius:
-                              effectiveGlowSpreadRadius,
-                          interactionGlowOpacity: effectiveGlowOpacity,
-                          interactionScale: widget.interactionBehavior.hasScale
-                              ? widget.pressScale
-                              : 1.0,
-                          childUnselected: _ltrTabRow(
-                            children: [
-                              for (var i = 0; i < tabs.length; i++)
-                                Expanded(
-                                  child: BottomBarTabItem(
-                                    tab: tabs[i],
-                                    selected: false,
-                                    selectedIconColor:
-                                        resolvedSelectedIconColor,
-                                    unselectedIconColor:
-                                        resolvedUnselectedIconColor,
-                                    selectedLabelColor:
-                                        widget.selectedLabelColor,
-                                    unselectedLabelColor:
-                                        widget.unselectedLabelColor,
-                                    selectedLabelStyle:
-                                        widget.selectedLabelStyle,
-                                    unselectedLabelStyle:
-                                        widget.unselectedLabelStyle,
-                                    iconSize: widget.iconSize,
-                                    labelFontSize: widget.labelFontSize,
-                                    textStyle: widget.textStyle,
-                                    iconLabelSpacing: widget.iconLabelSpacing,
-                                    glowDuration: widget.glowDuration,
-                                    glowBlurRadius: widget.glowBlurRadius,
-                                    glowSpreadRadius: widget.glowSpreadRadius,
-                                    glowOpacity: widget.glowOpacity,
-                                    onTap: null,
-                                  ),
-                                ),
-                            ],
-                          ),
-                          selectedTabBuilder: (context, intensity, alignment) =>
-                              _buildSelectedTabs(
-                                  intensity,
-                                  alignment,
-                                  tabs,
-                                  resolvedSelectedIconColor,
-                                  resolvedUnselectedIconColor),
-                          magnification: widget.magnification,
-                          innerBlur: widget.innerBlur,
-                        ),
                       ),
+                    ),
+                  );
+
+                  return Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      if (!extraShouldOverlayPill && extraButton != null)
+                        extraButton,
+                      tabPill,
+                      if (extraShouldOverlayPill && extraButton != null)
+                        extraButton,
                     ],
                   );
                 },
               ),
+            );
+            if (!_collapseEnabled) return content;
+            return GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap:
+                  _isCollapsed && (widget.collapseConfig?.expandOnTap ?? false)
+                      ? _expand
+                      : null,
+              onVerticalDragEnd: _handleVerticalDragEnd,
+              child: content,
             );
           },
         ),
@@ -385,7 +685,7 @@ class _TabBarBottomLayoutState extends State<TabBarBottomLayout> {
   Widget _buildSelectedTabs(
       double intensity,
       Alignment alignment,
-      List<GlassBottomBarTab> tabs,
+      List<GlassTab> tabs,
       Color resolvedSelectedIconColor,
       Color resolvedUnselectedIconColor) {
     final scale = ui.lerpDouble(1.0, widget.magnification, intensity) ?? 1.0;
@@ -395,36 +695,38 @@ class _TabBarBottomLayoutState extends State<TabBarBottomLayout> {
         (currentTabFloat - 1).floor().clamp(0, tabs.length - 1);
     final affectedEnd = (currentTabFloat + 1).ceil().clamp(0, tabs.length - 1);
 
-    return _ltrTabRow(
-      children: [
-        for (var i = 0; i < tabs.length; i++)
-          Expanded(
-            child: (i >= affectedStart && i <= affectedEnd)
-                ? Transform.scale(
-                    scale: scale,
-                    child: BottomBarTabItem(
-                      tab: tabs[i],
-                      selected: true,
-                      selectedIconColor: resolvedSelectedIconColor,
-                      unselectedIconColor: resolvedUnselectedIconColor,
-                      selectedLabelColor: widget.selectedLabelColor,
-                      unselectedLabelColor: widget.unselectedLabelColor,
-                      selectedLabelStyle: widget.selectedLabelStyle,
-                      unselectedLabelStyle: widget.unselectedLabelStyle,
-                      iconSize: widget.iconSize,
-                      labelFontSize: widget.labelFontSize,
-                      textStyle: widget.textStyle,
-                      iconLabelSpacing: widget.iconLabelSpacing,
-                      glowDuration: widget.glowDuration,
-                      glowBlurRadius: widget.glowBlurRadius,
-                      glowSpreadRadius: widget.glowSpreadRadius,
-                      glowOpacity: widget.glowOpacity,
-                      onTap: null,
-                    ),
-                  )
-                : const SizedBox.shrink(),
-          ),
-      ],
+    return ExcludeSemantics(
+      child: _ltrTabRow(
+        children: [
+          for (var i = 0; i < tabs.length; i++)
+            Expanded(
+              child: (i >= affectedStart && i <= affectedEnd)
+                  ? Transform.scale(
+                      scale: scale,
+                      child: BottomBarTabItem(
+                        tab: tabs[i],
+                        selected: true,
+                        selectedIconColor: resolvedSelectedIconColor,
+                        unselectedIconColor: resolvedUnselectedIconColor,
+                        selectedLabelColor: widget.selectedLabelColor,
+                        unselectedLabelColor: widget.unselectedLabelColor,
+                        selectedLabelStyle: widget.selectedLabelStyle,
+                        unselectedLabelStyle: widget.unselectedLabelStyle,
+                        iconSize: widget.iconSize,
+                        labelFontSize: widget.labelFontSize,
+                        textStyle: widget.textStyle,
+                        iconLabelSpacing: widget.iconLabelSpacing,
+                        glowDuration: widget.glowDuration,
+                        glowBlurRadius: widget.glowBlurRadius,
+                        glowSpreadRadius: widget.glowSpreadRadius,
+                        glowOpacity: widget.glowOpacity,
+                        onTap: null,
+                      ),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+        ],
+      ),
     );
   }
 }

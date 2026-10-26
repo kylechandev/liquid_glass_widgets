@@ -366,7 +366,8 @@ class _GlassSliderState extends State<GlassSlider>
     // Snap to divisions if provided
     if (widget.divisions != null) {
       final stepSize = (widget.max - widget.min) / widget.divisions!;
-      newValue = (newValue / stepSize).round() * stepSize + widget.min;
+      newValue =
+          ((newValue - widget.min) / stepSize).round() * stepSize + widget.min;
       newValue = newValue.clamp(widget.min, widget.max);
 
       // Haptic feedback on division change
@@ -641,9 +642,8 @@ class _GlassSliderState extends State<GlassSlider>
       ),
     );
 
-    // Use liquid glass with clean superellipse shape
-    // Border radius scales with the total height
-    final thumbShape = LiquidRoundedSuperellipse(
+    // Use exact stadium SDF for the thumb — eliminates squircle drift.
+    final thumbShape = LiquidRoundedRectangle(
       borderRadius: totalHeight / 2,
     );
 

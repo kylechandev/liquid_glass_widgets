@@ -116,6 +116,47 @@ void main() {
       expect(topOverlay.height, 50);
     });
 
+    // Preserve the fork's stronger fade curve through upstream merges.
+    testWidgets('huge retains its full height and gradient curve', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        CupertinoApp(
+          home: GlassScrollEdgeEffect(
+            topFadeHeight: 100,
+            style: GlassScrollEdgeStyle.huge,
+            fadeBottom: false,
+            fadeColor: Colors.white,
+            child: const SizedBox(),
+          ),
+        ),
+      );
+
+      final effect = find.byType(GlassScrollEdgeEffect);
+      final overlay = tester.widget<Positioned>(
+        find.descendant(of: effect, matching: find.byType(Positioned)),
+      );
+      final decoration =
+          tester
+                  .widget<DecoratedBox>(
+                    find.descendant(
+                      of: effect,
+                      matching: find.byType(DecoratedBox),
+                    ),
+                  )
+                  .decoration
+              as BoxDecoration;
+      final gradient = decoration.gradient! as LinearGradient;
+      expect(overlay.height, 100);
+      expect(gradient.stops, [0.0, 0.60, 0.80, 0.90, 0.99]);
+      expect(
+        gradient.colors.map((color) => color.a),
+        orderedEquals(
+          [1.0, 0.90, 0.50, 0.04, 0.0].map((alpha) => closeTo(alpha, 1 / 255)),
+        ),
+      );
+    });
+
     testWidgets('uses provided fadeColor', (tester) async {
       await tester.pumpWidget(
         CupertinoApp(

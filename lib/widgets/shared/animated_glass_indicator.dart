@@ -32,6 +32,11 @@ class AnimatedGlassIndicator extends StatelessWidget {
   /// Current alignment of the indicator.
   final Alignment alignment;
 
+  /// Axis along which fixed-size indicators travel.
+  ///
+  /// Defaults to horizontal so existing tab bars and bottom bars are unchanged.
+  final Axis direction;
+
   /// Animation value (0.0 to 1.0) indicating drag state.
   /// 0 = resting, >0 = dragging/animating.
   final double thickness;
@@ -51,7 +56,19 @@ class AnimatedGlassIndicator extends StatelessWidget {
   /// Whether to render the glass effect shader pass.
   final bool paintGlass;
 
-  /// Border radius of the indicator.
+  /// Corner radius of the indicator pill.
+  ///
+  /// Defaults to `9999.0`, which the shader's own `r = min(r, shortest)` clamp
+  /// reduces to a perfect capsule (stadium) at any indicator size — including
+  /// during drag expansion where a finite value such as `32` could be smaller
+  /// than the expanded half-height and leave visible corners.
+  ///
+  /// Pass a smaller value for indicators that deliberately show corner geometry,
+  /// for example a [GlassSegmentedControl] indicator inset by a few points from
+  /// its container radius:
+  /// ```dart
+  /// borderRadius: containerRadius - 3,
+  /// ```
   final double borderRadius;
 
   /// Optional glass settings override.
@@ -80,9 +97,6 @@ class AnimatedGlassIndicator extends StatelessWidget {
 
   /// How much to expand the indicator during drag.
   final EdgeInsetsGeometry expansion;
-
-  /// Whether to use LiquidRoundedSuperellipse (Apple style) or standard RoundedRectangle.
-  final bool useSuperellipse;
 
   /// Optional exact width for varying tab sizes (bypasses widthFactor).
   /// Used in scrollable mode where tabs have different widths.
@@ -129,11 +143,10 @@ class AnimatedGlassIndicator extends StatelessWidget {
     required this.quality,
     required this.indicatorColor,
     required this.isBackgroundIndicator,
-    required this.borderRadius,
+    this.borderRadius = GlassDefaults.capsuleRadius,
     this.settings,
     this.padding = EdgeInsets.zero,
     this.expansion = const EdgeInsets.all(8.0),
-    this.useSuperellipse = true,
     this.backgroundKey,
     this.paintBackground = true,
     this.paintGlass = true,
@@ -142,6 +155,7 @@ class AnimatedGlassIndicator extends StatelessWidget {
     this.shadows,
     this.pinchStrength = 1.0,
     this.innerBlur = 0.0,
+    this.direction = Axis.horizontal,
   });
 
   /// The iOS 26-calibrated default glass settings for all indicator pills.
@@ -268,10 +282,26 @@ class AnimatedGlassIndicator extends StatelessWidget {
     vertical: 15.0,
   );
 
+  /// Rotated clip budget for indicators whose travel axis is vertical.
+  static const _jellyClipExpansionVertical = EdgeInsets.symmetric(
+    horizontal: 15.0,
+    vertical: 20.0,
+  );
+
   @override
   Widget build(BuildContext context) {
+    final isVertical = direction == Axis.vertical;
+
     // Calculate expansion rectangle based on thickness
-    final resolvedExpansion = expansion.resolve(Directionality.of(context));
+    final resolved = expansion.resolve(Directionality.of(context));
+    final resolvedExpansion = isVertical
+        ? EdgeInsets.fromLTRB(
+            resolved.top,
+            resolved.left,
+            resolved.bottom,
+            resolved.right,
+          )
+        : resolved;
     final rect = RelativeRect.lerp(
       RelativeRect.fill,
       RelativeRect.fromLTRB(
@@ -286,13 +316,16 @@ class AnimatedGlassIndicator extends StatelessWidget {
     final bool isStdPath =
         quality == GlassQuality.standard || quality == GlassQuality.minimal;
 
-    // Provide the doubled radius to layout layers when superellipse is active
-    // so they match the shader's true shape exactly.
-    final effectiveRadius = useSuperellipse ? borderRadius * 2 : borderRadius;
-
-    final shape = useSuperellipse
-        ? LiquidRoundedSuperellipse(borderRadius: borderRadius * 2)
-        : LiquidRoundedRectangle(borderRadius: borderRadius);
+    // The indicator defaults to a perfect capsule: borderRadius=9999.0 is
+    // reduced by the shader's own `r = min(r, shortest)` clamp to
+    // min(half_width, half_height) at any indicator size — including during
+    // drag expansion where a finite value such as 32 would be smaller than
+    // the expanded half-height, leaving visible squarish corners.
+    //
+    // Callers that need visible corner geometry (e.g. GlassSegmentedControl)
+    // can pass a smaller borderRadius explicitly.
+    final effectiveRadius = borderRadius;
+    final shape = LiquidRoundedRectangle(borderRadius: borderRadius);
 
     // 1. Background Indicator (Resting state)
     // Fade out as the drag spring thickness increases toward 0.15.
@@ -341,7 +374,8 @@ class AnimatedGlassIndicator extends StatelessWidget {
       quality: quality,
       interactionIntensity: thickness,
       backgroundKey: backgroundKey,
-      clipExpansion: _jellyClipExpansion,
+      clipExpansion:
+          isVertical ? _jellyClipExpansionVertical : _jellyClipExpansion,
       // rimThickness translation: Premium uses thickness as 3D glass depth
       // (Impeller SDF — no visible border drawn). Standard uses rimThickness
       // as a literal pixel-width border in the GLSL shader, so the same raw
@@ -480,7 +514,9 @@ class AnimatedGlassIndicator extends StatelessWidget {
           child: Transform(
             alignment: Alignment.center,
             transform: DraggableIndicatorPhysics.buildJellyTransform(
-              velocity: Offset(velocity, 0),
+              velocity: direction == Axis.horizontal
+                  ? Offset(velocity, 0)
+                  : Offset(0, velocity),
               maxDistortion: isStdPath ? 0.35 : 0.8,
               velocityScale: 10,
             ),
@@ -493,6 +529,10 @@ class AnimatedGlassIndicator extends StatelessWidget {
     Widget positioning;
     if (exactWidth != null && exactOffset != null) {
       // Exact pixel positioning for scrollable mode with variable-width tabs
+      assert(
+        !isVertical,
+        'exactWidth/exactOffset positioning is horizontal-only',
+      );
       positioning = Positioned(
         left: exactOffset,
         top: 0,
@@ -504,7 +544,8 @@ class AnimatedGlassIndicator extends StatelessWidget {
       // Fractional positioning for fixed-width tabs
       positioning = Positioned.fill(
         child: FractionallySizedBox(
-          widthFactor: 1 / itemCount,
+          widthFactor: direction == Axis.horizontal ? 1 / itemCount : null,
+          heightFactor: direction == Axis.vertical ? 1 / itemCount : null,
           alignment: alignment,
           child: indicatorBody,
         ),
